@@ -1,6 +1,6 @@
 
 
-# tickchat2
+# TICKCHAT
 
 An end-to-end, production-lean RAG (Retrieval-Augmented Generation) assistant for classifying support tickets and answering “product knowledge” questions using a searchable knowledge base built from public documentation.
 
@@ -81,45 +81,102 @@ This repo combines **document retrieval** with **generative answers** so users g
 *(File names based on repository listing.)* ([GitHub][1])
 
 ---
+Perfect 👍 thanks for pasting the actual **RAG pipeline** and **classification pipeline** code.
+Now we can be very explicit in the README about exactly which **models** and **vector DB** your repo is wired to.
+
+Here’s the **revised “Design decisions & trade-offs”** section with the models + DBs from your code:
+
+---
 
 ## Design decisions & trade-offs
 
-### 1) **Vector DB: Pinecone vs FAISS**
+### 1) **Vector database**
 
-* **Picked:** Pinecone (managed, serverless, fast, easy to scale).
-* **Trade-off:** External dependency + API cost vs. FAISS’s zero cost and local speed.
-  *Guideline:* Use FAISS for fully offline or tiny datasets; use Pinecone for cloud deploys, sharing, and scale.
+* **Used:** [Pinecone](https://www.pinecone.io/), connected to the `atlan-docs` index.
+* **Why:**
 
-### 2) **Embeddings**
+  * **Pros:** Managed, scalable, serverless; works well on Streamlit Cloud / Replit where persistent local storage isn’t available.
+  * **Cons:** Requires API key, introduces external dependency and cost.
+* **Alternatives considered:**
 
-* **Options:** OpenAI `text-embedding-3-small` (cheap, strong quality), `text-embedding-3-large` (higher recall), or Sentence-Transformers (local).
-* **Trade-off:** API dependency vs. offline control.
-  *Guideline:* Start with `-3-small` for cost/quality balance; move up if recall is lacking.
+  * **FAISS:** Fast, open source, local-first. Great for small datasets and offline mode, but not practical for cloud-hosted apps without storage.
+  * **Redis:** In-memory + persistence option, but more ops overhead.
+* **Rationale:** Pinecone was chosen to simplify deployment and ensure the vector store is shared across environments.
 
-### 3) **Chunking**
+---
 
-* **Approach:** Recursive splitter by tokens/chars with small overlap (e.g., 512–800 tokens, 10–15% overlap).
-* **Trade-off:** Larger chunks increase recall but risk prompt bloat; smaller chunks reduce hallucinations but may lose context. Tune per corpus.
+### 2) **Embedding model**
 
-### 4) **Citations**
+* **Used:** [`sentence-transformers/all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2).
 
-* **Decision:** Always show the **source URLs** used to build the answer.
-* **Trade-off:** Slightly longer responses, but materially improves trust and debuggability.
+  * Dimension: **384** (code checks index vs. model dimension at startup).
+* **Why:**
 
-### 5) **Topic gating (guardrails)**
+  * Light, fast, widely used for semantic search.
+  * Open source, so no external API cost for embedding.
+* **Alternatives considered:**
 
-* **Decision:** If topic ∈ {How-to, Product, Best practices, API/SDK, SSO} → **use RAG**. Otherwise → **route only** (no RAG).
-* **Trade-off:** Simple logic is transparent and cheap vs. an LLM categorizer that’s more flexible but costs tokens. Start rule-based; upgrade to a lightweight LLM classifier if false positives/negatives appear.
+  * **OpenAI `text-embedding-3-small` / `-3-large`:** Higher recall but adds API dependency and cost.
+* **Rationale:** `all-MiniLM-L6-v2` balances **speed, accuracy, and zero API cost**, which is great for rapid iteration.
 
-### 6) **LLM provider**
+---
 
-* **Decision:** Keep the generator behind a small abstraction (`llm_utils.py`) so you can swap OpenAI/Groq/others.
-* **Trade-off:** Slight indirection, but enables A/B testing and failover.
+### 3) **Generator (answering) model**
 
-### 7) **Crawler**
+* **Used:** Groq-hosted **`llama-3.1-8b-instant`** for answer generation in the RAG pipeline.
+* **Why:**
 
-* **Decision:** Cautious crawling (robots.txt aware, rate-limited, MIME filtered) with **deduping** and **canonical URLs**; store only clean text.
-* **Trade-off:** Slower ingestion but cleaner KB, better retrieval quality.
+  * Low latency, inexpensive inference, good balance of reasoning and throughput.
+* **Alternatives considered:**
+
+  * Larger LLaMA models (`70B`) for higher reasoning power but slower/more expensive.
+  * OpenAI GPT-4o / GPT-4o-mini: high quality but adds API cost and dependency.
+* **Rationale:** Groq’s `8b-instant` chosen to prioritize **fast ticket turnaround and cost efficiency**.
+
+---
+
+### 4) **Classification model**
+
+* **Used:** Same Groq-hosted **`llama-3.1-8b-instant`**, prompted to output JSON conforming to a `TicketClassification` schema.
+* **Why:**
+
+  * One unified model handles both classification and generation (less infra complexity).
+* **Alternatives considered:**
+
+  * Dedicated small classifier model (e.g., fine-tuned DistilBERT). Would be cheaper per request but requires training + hosting overhead.
+* **Rationale:** Using `llama-3.1-8b-instant` avoids maintaining a separate model, while still giving structured outputs reliably.
+
+---
+
+### 5) **Chunking & retrieval**
+
+* **Used:** Sentence-Transformer embeddings split into \~800-token chunks with overlap, queried against Pinecone with `top_k=5`.
+* **Trade-off:**
+
+  * Small `k` → faster + cheaper, but may miss edge-case docs.
+  * Larger `k` → more context, but higher token cost and slower.
+* **Rationale:** `top_k=5` is a practical sweet spot for support ticket answers.
+
+---
+
+### 6) **Topic gating**
+
+* **Policy:** Only run RAG if ticket tags intersect with:
+  `{How-to, Product, Best practices, API/SDK, SSO}`.
+* **Why:**
+
+  * Reduces unnecessary RAG calls (saves cost, improves latency).
+  * Keeps answers focused on documentation-backed queries.
+* **Rationale:** Rule-based gating is cheap and transparent. If accuracy issues appear, can swap in an LLM-based classifier later.
+
+---
+
+➡️ So in short, pipeline is:
+
+* **Vector DB:** Pinecone (`atlan-docs`)
+* **Embedder:** `sentence-transformers/all-MiniLM-L6-v2` (384-dim)
+* **Generator:** Groq `llama-3.1-8b-instant`
+* **Classifier:** Groq `llama-3.1-8b-instant`
 
 ---
 
