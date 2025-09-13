@@ -18,4 +18,4 @@ pinecone
 async_timeout
 requests
 numpy
-"lxml[html_clean]"
+lxml[html]
