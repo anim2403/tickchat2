@@ -3,6 +3,8 @@
 
 [Live app](https://tickchat2-dlpfscev8wgdx6wpjarhdr.streamlit.app/)
 
+[Demo_Video](https://drive.google.com/file/d/1cT_pulXzbOrYYy7l-RXrMpAOhlskjNcU/view?usp=sharing)
+
 An end-to-end, production-lean RAG (Retrieval-Augmented Generation) assistant for classifying support tickets and answering “product knowledge” questions using a searchable knowledge base built from public documentation.
 
 * **Routable topics** (e.g., *How-to, Product, Best practices, API/SDK, SSO*) → go through the RAG pipeline and return an answer **with citations**.
