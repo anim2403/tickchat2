@@ -38,12 +38,9 @@ def classify_ticket(client: Groq, subject: str, body: str, model: str = "llama-3
     ticket_text = f"Subject: {subject}\nBody: {body}"
     system_message = SYSTEM_INSTRUCTIONS
     user_message = ticket_text
-    prompt = {
-        "system": system_message,
-        "user": user_message
-    }
     raw_output = None
     error = None
+
     try:
         completion = client.chat.completions.create(
             model=model,
@@ -53,15 +50,12 @@ def classify_ticket(client: Groq, subject: str, body: str, model: str = "llama-3
                 {"role": "user", "content": user_message},
             ],
         )
-        
         if hasattr(completion.choices[0].message, "content"):
             raw_output = completion.choices[0].message.content
         elif isinstance(completion.choices[0].message, dict) and "content" in completion.choices[0].message:
             raw_output = completion.choices[0].message["content"]
         else:
-            # print("DEBUG: Unexpected message structure:", completion.choices[0].message)
             raw_output = None
-        # print("DEBUG: raw_output =", raw_output)
         if not raw_output:
             error = "Model did not return any output."
     except Exception as e:
@@ -69,7 +63,7 @@ def classify_ticket(client: Groq, subject: str, body: str, model: str = "llama-3
         error = str(e)
 
     analysis = {
-        "prompt": prompt,
+        "prompt": {"system": system_message, "user": user_message},
         "raw_output": raw_output,
         "error": error
     }
@@ -77,11 +71,31 @@ def classify_ticket(client: Groq, subject: str, body: str, model: str = "llama-3
     try:
         if raw_output:
             data = _parse_json_strict(raw_output)
+
+            # apply filtering on topic_tags
+            conf = data.get("topic_tag_confidence", {})
+            filtered_tags = [t for t, score in conf.items() if score is not None and score >= 0.6]
+
+            data["topic_tags"] = filtered_tags
+            data["topic_tag_confidence"] = {t: score for t, score in conf.items() if score is not None and score >= 0.6}
+
             classification = TicketClassification(**data)
         else:
-            classification = TicketClassification(topic_tags=[], topic_tag_confidence={}, core_problem="", priority="", sentiment="")
+            classification = TicketClassification(
+                topic_tags=[],
+                topic_tag_confidence={},
+                core_problem="",
+                priority="",
+                sentiment=""
+            )
     except Exception as e:
-        classification = TicketClassification(topic_tags=[], topic_tag_confidence={}, core_problem="", priority="", sentiment="")
+        classification = TicketClassification(
+            topic_tags=[],
+            topic_tag_confidence={},
+            core_problem="",
+            priority="",
+            sentiment=""
+        )
         analysis["error"] = str(e)
 
     return analysis, classification
