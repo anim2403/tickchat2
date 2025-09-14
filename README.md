@@ -1,9 +1,11 @@
 
 # TICKCHAT
-[Live link](#https://tickchat2-dlpfscev8wgdx6wpjarhdr.streamlit.app/)
+
+[Live app](https://tickchat2-dlpfscev8wgdx6wpjarhdr.streamlit.app/)
+
 An end-to-end, production-lean RAG (Retrieval-Augmented Generation) assistant for classifying support tickets and answering “product knowledge” questions using a searchable knowledge base built from public documentation.
 
-* **Routable topics** (e.g., *How-to, Product, Best practices, API/SDK, SSO*) → go through the RAG pipeline and return an answer with citations.
+* **Routable topics** (e.g., *How-to, Product, Best practices, API/SDK, SSO*) → go through the RAG pipeline and return an answer **with citations**.
 * **Everything else** → display a clear, routed message (e.g., “This ticket has been classified as a ‘Connector’ issue and routed to the appropriate team.”)
 
 ---
@@ -64,14 +66,14 @@ This project combines **document retrieval** with **generative answers** so user
 
 **Key components**
 
-* `crawler_to_pinecone.py`: crawls allowed sites, cleans & chunks text, embeds, and **upserts into Pinecone**.
-* `rag_pipeline.py`: wraps retrieval + prompt assembly + generation + citation formatting.
+* `crawler_to_pinecone.py`: Crawls allowed sites, cleans & chunks text, embeds, and **upserts into Pinecone**.
+* `rag_pipeline.py`: Retrieval + prompt assembly + answer generation + citation formatting.
 * `llm_utils.py`: LLM wrapper for **classification + generation**. Returns **topic tags with confidence scores**, sentiment, priority, and core problem.
 * `models.py`: Pydantic classes for ticket classification and response typing.
-* `app.py`: minimal UI/API that classifies topics and either:
+* `app.py`: Streamlit app that classifies topics and either:
 
-  * calls RAG (for *How-to, Product, Best practices, API/SDK, SSO*), or
-  * returns a routed classification message for everything else.
+  * Calls RAG (for *How-to, Product, Best practices, API/SDK, SSO*), or
+  * Returns a routed classification message for everything else.
 
 ---
 
@@ -80,7 +82,7 @@ This project combines **document retrieval** with **generative answers** so user
 ### Vector database
 
 * **Used:** [Pinecone](https://www.pinecone.io/)
-* **Why:** Managed, scalable, no local persistence issues on Streamlit/Replit.
+* **Why:** Managed, scalable, avoids persistence issues on Streamlit/Replit.
 
 ### Embedding model
 
@@ -97,17 +99,17 @@ This project combines **document retrieval** with **generative answers** so user
 * **Used:** Same `llama-3.1-8b-instant`.
 * **Output:** JSON with:
 
-  * `topic_tags` (with **confidence scores**)
+  * `topic_tags` (**with confidence scores**)
   * `sentiment`
   * `priority`
   * `core_problem`
 
-Confidence scores are essential because they make routing decisions transparent and allow filtering low-confidence classifications.
+Confidence scores make routing decisions transparent and allow filtering out low-confidence predictions.
 
 ### Topic gating
 
 * **Policy:** Run RAG only if tags intersect with `{How-to, Product, Best practices, API/SDK, SSO}`.
-* **Why:** Saves cost + latency, ensures retrieval is used only where docs exist.
+* **Why:** Saves cost + latency, ensures retrieval is only used where docs exist.
 
 ---
 
@@ -115,11 +117,11 @@ Confidence scores are essential because they make routing decisions transparent 
 
 ```
 tickchat2/
-├─ app.py                   # UI/API entrypoint
+├─ app.py                   # UI entrypoint (Streamlit)
 ├─ rag_pipeline.py          # Retrieval + prompt assembly + generation
 ├─ crawler_to_pinecone.py   # Crawl + embed + upsert to Pinecone
-├─ llm_utils.py             # LLM classification & generation (with confidence scores)
-├─ models.py                # Typed data classes (topic tags, confidence, sentiment, priority, etc.)
+├─ llm_utils.py             # Classification & generation logic (with confidence scores)
+├─ models.py                # Pydantic schemas (topic tags, confidence, sentiment, priority, etc.)
 ├─ requirements.txt         # Python dependencies
 └─ README.md
 ```
@@ -151,8 +153,8 @@ pip install -r requirements.txt
 # Crawl docs & ingest into Pinecone
 python crawler_to_pinecone.py \
   --roots https://docs.atlan.com/ https://developer.atlan.com/ \
-  --index TICKCHAT2_INDEX \
-  --namespace default \
+  --index atlan-docs \
+  --namespace atlan \
   --max-pages 2000 \
   --concurrency 8 \
   --rps 2.0
@@ -174,21 +176,26 @@ GROQ_API_KEY=gsk_*********************************
 # Pinecone
 PINECONE_API_KEY=********************************
 PINECONE_INDEX=atlan-docs
-NAMESPACE=atlan
+PINECONE_NAMESPACE=atlan
 
 # Crawler
 CRAWL_ROOTS=https://docs.atlan.com/,https://developer.atlan.com/
 
 # App behavior
 RAG_TOPICS=How-to,Product,Best practices,API/SDK,SSO
-RETRIEVAL_K=6
+RETRIEVAL_K=5
+MAX_TOKENS=800
+TEMPERATURE=0.1
 ```
 
 ---
 
 ## Index build: crawl & ingest
 
-Respects `robots.txt`, cleans text, chunks, embeds, and upserts to Pinecone with metadata (url, title, text preview).
+* Respects `robots.txt` and rate limits.
+* Cleans text, strips nav/scripts/styles.
+* Splits into overlapping chunks.
+* Embeds each chunk and upserts to Pinecone with metadata (`url`, `title`, `text preview`, `chunk_id`).
 
 ---
 
@@ -205,27 +212,29 @@ streamlit run app.py
 1. **Classify the ticket**
 
    * `llm_utils` calls Groq model.
-   * Returns `topic_tags` **with confidence scores**, `sentiment`, `priority`, `core_problem`.
+   * Returns `topic_tags` **with confidence scores**, `sentiment`, `priority`, and `core_problem`.
 
    **Example JSON output:**
 
    ```json
    {
-     "topic_tags": [
-       {"tag": "Product", "confidence": 0.92},
-       {"tag": "How-to", "confidence": 0.81},
-       {"tag": "Connector", "confidence": 0.34}
-     ],
-     "sentiment": "neutral",
-     "priority": "medium",
+     "topic_tags": {
+       "Product": 0.92,
+       "How-to": 0.81,
+       "Connector": 0.34
+     },
+     "sentiment": "Neutral",
+     "priority": "P1",
      "core_problem": "User is asking how to configure API authentication"
    }
    ```
 
+   *Tags with confidence < 0.6 are filtered out in the pipeline.*
+
 2. **Check topic gating**
 
-   * If tags ∈ `{How-to, Product, Best practices, API/SDK, SSO}`, → run RAG.
-   * Else, → return routed message.
+   * If any tag ∈ `{How-to, Product, Best practices, API/SDK, SSO}` → run RAG.
+   * Else → return routed message.
 
 3. **Retrieve**
 
@@ -233,15 +242,16 @@ streamlit run app.py
 
 4. **Assemble prompt**
 
-   * Include system msg + user msg + retrieved chunks.
+   * System msg + user msg + retrieved chunks.
 
 5. **Generate answer**
 
-   * LLM produces response.
+   * Groq model produces structured, grounded answer.
 
 6. **Cite sources**
 
-   * Unique URLs from retrieved docs shown in final answer.
+   * Unique URLs from retrieved docs shown at the end of the answer.
 
 ---
+
 
